@@ -104,7 +104,6 @@ class StructuredLogger:
         passed: bool,
         expected_outcome: str,
         actual_outcome: str,
-        triggered_guardrails: list[dict[str, Any]],
         details: dict[str, Any] | None = None,
     ) -> None:
         self._emit({
@@ -113,7 +112,6 @@ class StructuredLogger:
             "passed": passed,
             "expected_outcome": expected_outcome,
             "actual_outcome": actual_outcome,
-            "triggered_guardrails": triggered_guardrails,
             "details": details or {},
         })
 

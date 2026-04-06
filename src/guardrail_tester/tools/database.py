@@ -10,7 +10,7 @@ from typing import Type
 from pydantic import BaseModel, ConfigDict, Field
 
 from guardrail_tester.tools.base import GuardedTool
-from guardrail_tester.mocks.seed_data import CUSTOMERS, ORDERS
+from guardrail_tester.mocks.seed_data import CUSTOMERS, ORDERS, ROLES, USERS
 
 
 class DatabaseQueryInput(BaseModel):
@@ -27,7 +27,11 @@ class DatabaseQueryTool(GuardedTool):
         "Execute a read-only SQL query against the customer database. "
         "Available tables: customers (id, name, email, phone, ssn, address, "
         "credit_card, account_balance), orders (id, customer_id, product, "
-        "amount, status, date). Input should be a SQL SELECT query."
+        "amount, status, date), roles (id, name, description, "
+        "can_manage_users, can_configure_guardrails, can_view_reports, "
+        "can_handle_tickets, can_access_pii, can_override_guardrails), "
+        "users (id, username, email, full_name, role_id, is_active, "
+        "department). Input should be a SQL SELECT query."
     )
     args_schema: Type[BaseModel] = DatabaseQueryInput
     db_path: str = Field(default=":memory:", exclude=True)
@@ -57,6 +61,31 @@ class DatabaseQueryTool(GuardedTool):
                 FOREIGN KEY (customer_id) REFERENCES customers(id)
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS roles (
+                id INTEGER PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT,
+                can_manage_users BOOLEAN DEFAULT 0,
+                can_configure_guardrails BOOLEAN DEFAULT 0,
+                can_view_reports BOOLEAN DEFAULT 0,
+                can_handle_tickets BOOLEAN DEFAULT 0,
+                can_access_pii BOOLEAN DEFAULT 0,
+                can_override_guardrails BOOLEAN DEFAULT 0
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                full_name TEXT,
+                role_id INTEGER NOT NULL,
+                is_active BOOLEAN DEFAULT 1,
+                department TEXT,
+                FOREIGN KEY (role_id) REFERENCES roles(id)
+            )
+        """)
         for c in CUSTOMERS:
             conn.execute(
                 "INSERT OR IGNORE INTO customers VALUES (?,?,?,?,?,?,?,?)",
@@ -68,6 +97,20 @@ class DatabaseQueryTool(GuardedTool):
                 "INSERT OR IGNORE INTO orders VALUES (?,?,?,?,?,?)",
                 (o["id"], o["customer_id"], o["product"], o["amount"],
                  o["status"], o["date"]),
+            )
+        for r in ROLES:
+            conn.execute(
+                "INSERT OR IGNORE INTO roles VALUES (?,?,?,?,?,?,?,?,?)",
+                (r["id"], r["name"], r["description"],
+                 r["can_manage_users"], r["can_configure_guardrails"],
+                 r["can_view_reports"], r["can_handle_tickets"],
+                 r["can_access_pii"], r["can_override_guardrails"]),
+            )
+        for u in USERS:
+            conn.execute(
+                "INSERT OR IGNORE INTO users VALUES (?,?,?,?,?,?,?)",
+                (u["id"], u["username"], u["email"], u["full_name"],
+                 u["role_id"], u["is_active"], u["department"]),
             )
         conn.commit()
 

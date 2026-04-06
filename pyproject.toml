@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "guardrail-testing-platform"
 version = "0.1.0"
-description = "Agentic AI application for testing and validating LLM guardrails"
+description = "Realistic agentic AI customer support app — used as a target for guardrail testing"
 requires-python = ">=3.11"
 dependencies = [
     "langchain>=0.3.0",

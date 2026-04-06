@@ -1,4 +1,4 @@
-"""Eval reporter — aggregates and displays results."""
+"""Eval reporter — aggregates scenario results and displays a summary."""
 
 from __future__ import annotations
 
@@ -29,11 +29,6 @@ def generate_summary(results: list[ScenarioResult]) -> dict[str, Any]:
     by_outcome = Counter(r.actual_outcome for r in results)
     by_expected = Counter(r.expected_outcome for r in results)
 
-    triggered_guards = Counter()
-    for r in results:
-        for tg in r.triggered_guardrails:
-            triggered_guards[tg.get("name", "unknown")] += 1
-
     failures = []
     for r in results:
         if not r.passed:
@@ -54,7 +49,6 @@ def generate_summary(results: list[ScenarioResult]) -> dict[str, Any]:
         "by_category": by_category,
         "by_actual_outcome": dict(by_outcome),
         "by_expected_outcome": dict(by_expected),
-        "triggered_guardrails": dict(triggered_guards),
         "failures": failures,
     }
 
@@ -63,7 +57,7 @@ def print_report(results: list[ScenarioResult]) -> None:
     summary = generate_summary(results)
 
     print("\n" + "=" * 60)
-    print("  GUARDRAIL EVAL REPORT")
+    print("  TEST REPORT")
     print("=" * 60)
 
     print(f"\n  Total scenarios: {summary['total']}")
@@ -81,12 +75,6 @@ def print_report(results: list[ScenarioResult]) -> None:
     print("  " + "-" * 50)
     for outcome, count in summary["by_actual_outcome"].items():
         print(f"    {outcome:<25} {count}")
-
-    if summary["triggered_guardrails"]:
-        print("\n  Triggered Guardrails:")
-        print("  " + "-" * 50)
-        for guard, count in summary["triggered_guardrails"].items():
-            print(f"    {guard:<25} {count} times")
 
     if summary["failures"]:
         print(f"\n  Failures ({len(summary['failures'])}):")

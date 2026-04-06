@@ -1,24 +1,16 @@
-"""Agent runtime — sets up and runs the LangChain 1.x agent with guardrail middleware."""
+"""Agent runtime — a clean LangChain 1.x agent with tools. No guardrails built in."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import yaml
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware
-from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 from guardrail_tester.agent.prompts import SYSTEM_PROMPT
-from guardrail_tester.guardrails.base import (
-    GuardrailContext,
-    GuardrailLayer,
-    GuardrailRegistry,
-)
-from guardrail_tester.guardrails.engine import GuardrailEngine
 from guardrail_tester.logging.structured import get_logger
 from guardrail_tester.tools.web_search import WebSearchTool
 from guardrail_tester.tools.database import DatabaseQueryTool
@@ -32,113 +24,6 @@ from guardrail_tester.tools.knowledge_base import KnowledgeBaseSearchTool
 from guardrail_tester.tools.report_gen import ReportGenerateTool
 
 logger = get_logger(__name__)
-
-
-class GuardrailMiddleware(AgentMiddleware):
-    """LangChain middleware that runs guardrails at input, tool, and output layers."""
-
-    def __init__(self, engine: GuardrailEngine) -> None:
-        self._engine = engine
-        self.tools: list = []
-
-    async def abefore_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        messages = state.get("messages", [])
-        if not messages:
-            return None
-
-        last_msg = messages[-1]
-        if not isinstance(last_msg, HumanMessage):
-            return None
-
-        context = GuardrailContext(
-            content=last_msg.content,
-            layer=GuardrailLayer.INPUT,
-        )
-        results = await self._engine.run_layer(GuardrailLayer.INPUT, context)
-
-        if self._engine.has_block(results):
-            blocked = next(r for r in results if not r.passed)
-            return {
-                "messages": [
-                    AIMessage(content=f"[BLOCKED] {blocked.message}")
-                ]
-            }
-
-        rewritten = self._engine.get_rewritten_content(results, last_msg.content)
-        if rewritten != last_msg.content:
-            new_messages = list(messages[:-1]) + [HumanMessage(content=rewritten)]
-            return {"messages": new_messages}
-
-        return None
-
-    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        messages = state.get("messages", [])
-        if not messages:
-            return None
-
-        last_msg = messages[-1]
-        if not isinstance(last_msg, AIMessage):
-            return None
-
-        if last_msg.tool_calls:
-            return None
-
-        context = GuardrailContext(
-            content=last_msg.content or "",
-            layer=GuardrailLayer.OUTPUT,
-        )
-        results = await self._engine.run_layer(GuardrailLayer.OUTPUT, context)
-
-        if self._engine.has_block(results):
-            blocked = next(r for r in results if not r.passed)
-            return {
-                "messages": [
-                    AIMessage(content=f"[OUTPUT BLOCKED] {blocked.message}")
-                ]
-            }
-
-        rewritten = self._engine.get_rewritten_content(results, last_msg.content or "")
-        if rewritten != (last_msg.content or ""):
-            return {
-                "messages": [AIMessage(content=rewritten)]
-            }
-
-        return None
-
-    async def awrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Any]],
-    ) -> ToolMessage | Any:
-        tool_call = request.tool_call
-        tool_name = tool_call.get("name", "unknown")
-        tool_args = tool_call.get("args", {})
-
-        context = GuardrailContext(
-            content=str(tool_args),
-            layer=GuardrailLayer.TOOL,
-            tool_name=tool_name,
-            tool_args=tool_args,
-        )
-        pre_results = await self._engine.run_layer(GuardrailLayer.TOOL, context)
-
-        if self._engine.has_block(pre_results):
-            blocked = next(r for r in pre_results if not r.passed)
-            return ToolMessage(
-                content=f"[TOOL BLOCKED by {blocked.guardrail_name}] {blocked.message}",
-                tool_call_id=tool_call.get("id", ""),
-            )
-
-        result = await handler(request)
-
-        logger.log_tool_call(
-            tool_name=tool_name,
-            tool_args=tool_args,
-            phase="post",
-            result=result.content if isinstance(result, ToolMessage) else str(result),
-        )
-
-        return result
 
 
 def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
@@ -183,14 +68,13 @@ def create_llm(
     return ChatOpenAI(
         base_url=base_url or llm_config.get("base_url", "http://localhost:11434/v1"),
         api_key=llm_config.get("api_key", "ollama"),
-        model=config.get("agent", {}).get("model", "qwen2.5:7b"),
+        model=config.get("agent", {}).get("model", "qwen2.5:3b"),
         temperature=config.get("agent", {}).get("temperature", 0.1),
     )
 
 
 def build_agent(
     config: dict[str, Any] | None = None,
-    guardrail_registry: GuardrailRegistry | None = None,
     base_url: str | None = None,
     system_prompt: str | None = None,
 ):
@@ -198,20 +82,12 @@ def build_agent(
     llm = create_llm(config, base_url=base_url)
     tools = create_tools(config)
 
-    middleware = []
-    if guardrail_registry:
-        engine = GuardrailEngine(guardrail_registry)
-        middleware.append(GuardrailMiddleware(engine))
-
-    agent = create_agent(
+    return create_agent(
         model=llm,
         tools=tools,
         system_prompt=system_prompt or SYSTEM_PROMPT,
-        middleware=middleware,
         debug=config.get("agent", {}).get("verbose", False),
     )
-
-    return agent
 
 
 def _extract_tool_calls(messages: list) -> list[dict[str, Any]]:
@@ -241,65 +117,31 @@ def _extract_tool_calls(messages: list) -> list[dict[str, Any]]:
 async def run_agent(
     user_input: str,
     config: dict[str, Any] | None = None,
-    guardrail_registry: GuardrailRegistry | None = None,
     base_url: str | None = None,
     system_prompt: str | None = None,
 ) -> dict[str, Any]:
     config = config or load_config()
-
-    if guardrail_registry is None:
-        guardrail_registry = GuardrailRegistry()
-
-    engine = GuardrailEngine(guardrail_registry)
     logger.log_input(user_input)
 
-    input_context = GuardrailContext(
-        content=user_input, layer=GuardrailLayer.INPUT
-    )
-    input_results = await engine.run_layer(GuardrailLayer.INPUT, input_context)
-
-    if engine.has_block(input_results):
-        blocked = next(r for r in input_results if not r.passed)
-        output = f"[BLOCKED] {blocked.message}"
-        logger.log_output(output, {"blocked_by": blocked.guardrail_name})
-        return {
-            "input": user_input,
-            "output": output,
-            "blocked": True,
-            "blocked_by": blocked.guardrail_name,
-            "guardrail_results": [
-                {"name": r.guardrail_name, "passed": r.passed, "action": r.action.value, "message": r.message}
-                for r in input_results
-            ],
-            "intermediate_steps": [],
-        }
-
-    effective_input = engine.get_rewritten_content(input_results, user_input)
-
-    agent = build_agent(
-        config=config,
-        guardrail_registry=guardrail_registry,
-        base_url=base_url,
-        system_prompt=system_prompt,
-    )
+    agent = build_agent(config=config, base_url=base_url, system_prompt=system_prompt)
 
     try:
         result = await agent.ainvoke(
-            {"messages": [HumanMessage(content=effective_input)]}
+            {"messages": [HumanMessage(content=user_input)]}
         )
     except Exception as e:
         error_msg = str(e)
         logger.log_error(error_msg)
+
+        blocked = False
+        if "400" in error_msg or "blocked" in error_msg.lower():
+            blocked = True
+
         return {
             "input": user_input,
             "output": f"[ERROR] {error_msg}",
-            "blocked": "blocked by guardrail" in error_msg.lower(),
-            "blocked_by": "tool_guardrail" if "blocked by guardrail" in error_msg.lower() else None,
+            "blocked": blocked,
             "error": error_msg,
-            "guardrail_results": [
-                {"name": r.guardrail_name, "passed": r.passed, "action": r.action.value, "message": r.message}
-                for r in input_results
-            ],
             "intermediate_steps": [],
         }
 
@@ -310,34 +152,12 @@ async def run_agent(
             agent_output = msg.content
             break
 
-    output_context = GuardrailContext(
-        content=agent_output, layer=GuardrailLayer.OUTPUT
-    )
-    output_results = await engine.run_layer(GuardrailLayer.OUTPUT, output_context)
-
-    blocked = False
-    blocked_by = None
-    if engine.has_block(output_results):
-        blocked_result = next(r for r in output_results if not r.passed)
-        agent_output = f"[OUTPUT BLOCKED] {blocked_result.message}"
-        blocked = True
-        blocked_by = blocked_result.guardrail_name
-    else:
-        agent_output = engine.get_rewritten_content(output_results, agent_output)
-
     logger.log_output(agent_output)
-
-    all_guardrail_results = input_results + output_results
     tool_steps = _extract_tool_calls(messages)
 
     return {
         "input": user_input,
         "output": agent_output,
-        "blocked": blocked,
-        "blocked_by": blocked_by,
-        "guardrail_results": [
-            {"name": r.guardrail_name, "passed": r.passed, "action": r.action.value, "message": r.message}
-            for r in all_guardrail_results
-        ],
+        "blocked": False,
         "intermediate_steps": tool_steps,
     }

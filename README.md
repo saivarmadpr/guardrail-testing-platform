@@ -1,6 +1,8 @@
 # Guardrail Testing Platform
 
-An agentic AI application built with LangChain whose primary purpose is to **test and validate LLM guardrails** — including [Votal](https://github.com/your-org/litellm-guardrails-votal-ai) guardrails via the LiteLLM proxy.
+A realistic agentic AI customer support application built with LangChain. It has 10 tools, handles multi-step requests, and behaves like a production app.
+
+The agent itself has **no guardrails built in** — it is designed to be the **target** for external guardrail systems like [Votal](https://github.com/your-org/litellm-guardrails-votal-ai) via the LiteLLM proxy.
 
 ## Quick Start
 
@@ -9,58 +11,79 @@ An agentic AI application built with LangChain whose primary purpose is to **tes
 pip install -e ".[dev]"
 
 # Make sure Ollama is running with a model
-ollama pull qwen2.5:7b
+ollama pull qwen2.5:3b
 
-# Run the agent interactively
+# Run the agent with a single prompt
 guardrail-tester run "Look up customer John Smith and draft a summary email"
 
-# Run through LiteLLM proxy (with Votal guardrails)
+# Run through LiteLLM proxy (Votal guardrails intercept every LLM call)
 guardrail-tester run --llm-base-url http://localhost:4000/v1 "Look up customer John Smith"
 
-# Run eval suite
-guardrail-tester eval --scenarios scenarios/
+# Send batch test scenarios to the agent
+guardrail-tester test --scenarios scenarios/
 
-# Run specific category
-guardrail-tester eval --scenarios scenarios/pii/
+# Test a specific category
+guardrail-tester test --scenarios scenarios/pii/
 ```
 
 ## Architecture
 
 ```
-User Input → [Input Guards] → Agent (ReAct) → [Tool Guards] → Tools → LLM (via LiteLLM/Ollama) → [Output Guards] → Response
+User → Agent (ReAct) → Tools → LLM (Ollama / LiteLLM proxy) → Response
 ```
 
-Three guardrail layers:
-- **Input**: PII detection, prompt injection, topic filtering
-- **Tool**: Permission checks, parameter validation, rate limiting, scope enforcement
-- **Output**: PII leakage, toxicity, hallucination detection
+The agent is a clean, realistic customer support app. It does **not** enforce any guardrails itself. To test guardrails, point the agent at a LiteLLM proxy that runs Votal (or any other guardrail) on pre-call and post-call hooks.
+
+### Tools (10)
+
+| Tool | Description |
+|------|-------------|
+| `web_search` | DuckDuckGo web search |
+| `database_query` | SQLite customer database (read-only) |
+| `email_send` | Draft and send emails (dry-run mode) |
+| `user_data_lookup` | Customer record lookup by name/email/ID |
+| `file_read` | Read files from internal filesystem |
+| `api_call` | HTTP requests to external APIs |
+| `calendar_manage` | List, create, delete calendar events |
+| `code_execute` | Run Python in a restricted sandbox |
+| `knowledge_base_search` | Search internal docs and policies |
+| `report_generate` | Generate customer reports |
+
+## Testing Guardrails
+
+### 1. Start the LiteLLM proxy with Votal
+
+```bash
+cd /path/to/litellm-guardrails-votal-ai
+litellm --config config.yaml --port 4000
+```
+
+### 2. Point the agent at the proxy
+
+```bash
+guardrail-tester run --llm-base-url http://localhost:4000/v1 "Tell me John Smith's SSN"
+```
+
+Every LLM call now flows through Votal's pre/post-call hooks. The proxy decides whether to block, allow, or modify the request — the agent never knows.
+
+### 3. Run the test suite
+
+```bash
+guardrail-tester test --scenarios scenarios/ --llm-base-url http://localhost:4000/v1
+```
+
+The test command sends 30 adversarial, benign, and edge-case scenarios to the agent, records what happened, and produces a pass/fail report showing which prompts were blocked vs allowed.
 
 ## Project Structure
 
 ```
-config/              # Agent, guardrail, and LiteLLM proxy configs
+config/              # Agent config and LiteLLM proxy config
 src/guardrail_tester/
-  agent/             # ReAct agent runtime and system prompts
-  tools/             # 10 guarded tools (web search, DB, email, etc.)
-  guardrails/        # Pluggable guardrail framework (input/tool/output)
-  eval/              # Scenario runner, reporter, adversarial generator
-  mocks/             # Mock Votal server and seed data
+  agent/             # ReAct agent runtime and system prompt
+  tools/             # 10 tools (web search, DB, email, etc.)
+  eval/              # External test runner, reporter, scenario loader
+  mocks/             # Mock seed data for tools
   logging/           # Structured JSON-lines logging
-scenarios/           # YAML test scenario definitions
-tests/               # pytest test suite
+scenarios/           # YAML test scenario definitions (30 scenarios)
+tests/               # pytest unit tests
 ```
-
-## Running with Votal Guardrails
-
-1. Start the LiteLLM proxy with Votal:
-   ```bash
-   cd /path/to/litellm-guardrails-votal-ai
-   litellm --config config.yaml --port 4000
-   ```
-
-2. Point the agent at the proxy:
-   ```bash
-   guardrail-tester run --llm-base-url http://localhost:4000/v1 "your prompt"
-   ```
-
-Every LLM call flows through Votal's pre/post-call hooks automatically.
