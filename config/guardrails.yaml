@@ -1,0 +1,50 @@
+guardrails:
+  input:
+    pii_detector:
+      enabled: true
+      action: "rewrite"  # block | rewrite | escalate | log | degrade
+    injection_detector:
+      enabled: true
+      action: "block"
+    topic_filter:
+      enabled: false
+      allowed_topics: ["customer_support", "account_management", "general"]
+
+  tool:
+    permission_checker:
+      enabled: true
+      action: "block"
+    param_validator:
+      enabled: true
+      action: "block"
+    rate_limiter:
+      enabled: true
+      action: "degrade"
+      max_calls_per_minute: 30
+      max_calls_per_tool: 10
+    scope_enforcer:
+      enabled: false
+      action: "escalate"
+
+  output:
+    pii_filter:
+      enabled: true
+      action: "rewrite"
+    toxicity_filter:
+      enabled: true
+      action: "block"
+    hallucination_detector:
+      enabled: false
+      action: "log"
+
+response_actions:
+  block:
+    message: "This request has been blocked by a guardrail."
+  rewrite:
+    log_original: true
+  escalate:
+    auto_approve: true  # for automated testing; false for interactive
+  log:
+    level: "WARNING"
+  degrade:
+    disable_tools: []

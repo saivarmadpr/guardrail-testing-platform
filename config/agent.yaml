@@ -1,0 +1,27 @@
+agent:
+  model: "qwen2.5:3b"
+  temperature: 0.1
+  max_iterations: 15
+  verbose: false
+
+llm:
+  provider: "ollama"
+  base_url: "http://localhost:11434/v1"
+  api_key: "ollama"
+
+tools:
+  enabled:
+    - web_search
+    - database_query
+    - email_send
+    - user_data_lookup
+    - file_read
+    - api_call
+    - calendar_manage
+    - code_execute
+    - knowledge_base_search
+    - report_generate
+
+execution:
+  mode: "dry_run"
+  require_approval: false
