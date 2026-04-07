@@ -7,7 +7,7 @@ agent:
 llm:
   provider: "litellm"
   base_url: "http://localhost:4000/v1"
-  api_key: "sk-proj-eJY2mCVbRc1vPrX2PeW3T3BlbkFJxQMfzx3fVhvSjFtxL9Nw"
+  api_key: "sk-proj"
 
 # Votal Shield — direct API integration for tool-level and agent-level guardrails.
 # The LiteLLM proxy handles input/output guardrails at the LLM call level.
