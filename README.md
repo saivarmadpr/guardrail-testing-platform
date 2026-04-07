@@ -1,6 +1,6 @@
 # Guardrail Testing Platform
 
-A realistic agentic AI customer support application built with LangChain 1.x. 10 tools, multi-step reasoning, and full integration with [Votal Shield](https://votal.ai) for guardrails at every layer.
+A realistic agentic AI customer support application built with LangChain 1.x. 10 tools, multi-step reasoning, and full integration with [Votal Shield](https://github.com/sundi133/llm-shield) for guardrails at every layer.
 
 ## Who is this for
 
