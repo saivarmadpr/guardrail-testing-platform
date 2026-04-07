@@ -9,6 +9,16 @@ llm:
   base_url: "http://localhost:4000/v1"
   api_key: "sk-1234"
 
+# Votal Shield — direct API integration for tool-level and agent-level guardrails.
+# The LiteLLM proxy handles input/output guardrails at the LLM call level.
+# Shield adds 3 more checkpoints: tool pre-check, tool output sanitization, agent budget/loops.
+shield:
+  enabled: true
+  base_url: "https://your-votal-endpoint.com"
+  api_key: "${VOTAL_API_KEY}"
+  agent_key: "acme-support-agent"
+  timeout: 10.0
+
 tools:
   enabled:
     - web_search

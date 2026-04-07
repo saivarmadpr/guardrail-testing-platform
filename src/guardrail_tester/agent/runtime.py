@@ -1,7 +1,15 @@
-"""Agent runtime — a clean LangChain 1.x agent with tools. No guardrails built in."""
+"""Agent runtime — LangChain 1.x agent with Votal Shield integration.
+
+All LLM calls route through the LiteLLM proxy (input/output guardrails).
+When shield config is present, the agent also calls the Votal Shield API
+directly for tool-level and agent-level guardrails (5-checkpoint model).
+"""
 
 from __future__ import annotations
 
+import os
+import re
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -66,10 +74,44 @@ def create_llm(
     llm_config = config.get("llm", {})
 
     return ChatOpenAI(
-        base_url=base_url or llm_config.get("base_url", "http://localhost:11434/v1"),
-        api_key=llm_config.get("api_key", "ollama"),
-        model=config.get("agent", {}).get("model", "qwen2.5:3b"),
+        base_url=base_url or llm_config.get("base_url", "http://localhost:4000/v1"),
+        api_key=llm_config.get("api_key", "sk-1234"),
+        model=config.get("agent", {}).get("model", "gpt-4.1-mini"),
         temperature=config.get("agent", {}).get("temperature", 0.1),
+    )
+
+
+def _resolve_env(value: str) -> str:
+    """Expand ${VAR_NAME} references in a string from os.environ."""
+    if not isinstance(value, str):
+        return value
+    return re.sub(
+        r"\$\{(\w+)\}",
+        lambda m: os.environ.get(m.group(1), m.group(0)),
+        value,
+    )
+
+
+def _build_shield(config: dict[str, Any]):
+    """Build a VotalShield client from config. Returns None if shield is disabled."""
+    shield_cfg = config.get("shield", {})
+    if not shield_cfg.get("enabled", False):
+        return None
+
+    base_url = _resolve_env(shield_cfg.get("base_url", ""))
+    api_key = _resolve_env(shield_cfg.get("api_key", ""))
+
+    if not base_url or not api_key:
+        return None
+
+    from guardrail_tester.shield.client import VotalShield
+
+    return VotalShield(
+        base_url=base_url,
+        api_key=api_key,
+        agent_key=_resolve_env(shield_cfg.get("agent_key", "acme-support-agent")),
+        session_id=_resolve_env(shield_cfg.get("session_id", "")) or str(uuid.uuid4())[:12],
+        timeout=shield_cfg.get("timeout", 10.0),
     )
 
 
@@ -82,10 +124,19 @@ def build_agent(
     llm = create_llm(config, base_url=base_url)
     tools = create_tools(config)
 
+    middleware = []
+    prompt = system_prompt or SYSTEM_PROMPT
+
+    shield = _build_shield(config)
+    if shield:
+        from guardrail_tester.shield.middleware import VotalShieldMiddleware
+        middleware.append(VotalShieldMiddleware(shield, system_prompt=prompt))
+
     return create_agent(
         model=llm,
         tools=tools,
-        system_prompt=system_prompt or SYSTEM_PROMPT,
+        system_prompt=prompt,
+        middleware=middleware,
         debug=config.get("agent", {}).get("verbose", False),
     )
 
@@ -155,9 +206,11 @@ async def run_agent(
     logger.log_output(agent_output)
     tool_steps = _extract_tool_calls(messages)
 
+    blocked = "[BLOCKED]" in agent_output or "[OUTPUT BLOCKED]" in agent_output
+
     return {
         "input": user_input,
         "output": agent_output,
-        "blocked": False,
+        "blocked": blocked,
         "intermediate_steps": tool_steps,
     }
