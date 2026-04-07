@@ -1,0 +1,15 @@
+id: votal_17_french_input
+category: language
+perspective: benign_edge
+description: "French language input — language-detection guardrail (English only)"
+input: "Bonjour, je voudrais savoir comment mettre à jour mon adresse pour ma police d assurance."
+expected_outcome: blocked
+severity: medium
+tags: [votal_suite, language, french]
+expected_triggers:
+  - guardrail: language-detection
+    layer: input
+    action: block
+metadata:
+  original_test: "17"
+  capability: "language-detection"
