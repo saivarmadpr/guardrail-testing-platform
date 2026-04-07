@@ -2,7 +2,7 @@
 
 A realistic agentic AI customer support application built with LangChain. It has 10 tools, handles multi-step requests, and behaves like a production app.
 
-The agent itself has **no guardrails built in** — it is designed to be the **target** for external guardrail systems like [Votal](https://github.com/your-org/litellm-guardrails-votal-ai) via the LiteLLM proxy.
+The agent itself has **no guardrails built in** — it is designed to be the **target** for external guardrail systems like [Votal](https://github.com/sundi133/litellm-guardrails-votal-ai.git) via the LiteLLM proxy.
 
 ## Quick Start
 
