@@ -42,6 +42,7 @@ async def run_scenario(
     scenario: Scenario,
     config: dict[str, Any] | None = None,
     base_url: str | None = None,
+    mode: str = "full",
 ) -> ScenarioResult:
     from guardrail_tester.agent.runtime import run_agent
 
@@ -50,6 +51,7 @@ async def run_scenario(
             user_input=scenario.input,
             config=config,
             base_url=base_url,
+            mode=mode,
         )
     except Exception as e:
         return ScenarioResult(
@@ -86,6 +88,7 @@ async def run_eval(
     scenarios_dir: str | Path,
     config: dict[str, Any] | None = None,
     base_url: str | None = None,
+    mode: str = "full",
 ) -> list[ScenarioResult]:
     scenarios_path = Path(scenarios_dir)
     scenarios = load_scenarios_from_dir(scenarios_path)
@@ -100,11 +103,12 @@ async def run_eval(
     results = []
 
     for scenario in scenarios:
-        print(f"Running scenario: {scenario.id} [{scenario.category}]...", end=" ", flush=True)
+        print(f"[{mode}] Running scenario: {scenario.id} [{scenario.category}]...", end=" ", flush=True)
         result = await run_scenario(
             scenario=scenario,
             config=config,
             base_url=base_url,
+            mode=mode,
         )
         status = "PASS" if result.passed else "FAIL"
         print(f"{status} (expected={result.expected_outcome}, actual={result.actual_outcome})")

@@ -67,15 +67,52 @@ def create_tools(config: dict[str, Any] | None = None) -> list:
     return [all_tools[name] for name in enabled if name in all_tools]
 
 
+VALID_MODES = ("bare", "proxy-only", "full")
+
+
+def resolve_mode(mode: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Return LLM connection params and shield toggle for the given guardrail mode.
+
+    bare        -- direct to OpenAI, no proxy, no shield
+    proxy-only  -- through LiteLLM proxy (input/output guardrails), no shield
+    full        -- LiteLLM proxy + Shield middleware (all 5 checkpoints)
+    """
+    if mode not in VALID_MODES:
+        raise ValueError(f"Invalid mode {mode!r}. Choose from {VALID_MODES}")
+
+    llm_cfg = config.get("llm", {})
+
+    if mode == "bare":
+        return {
+            "base_url": "https://api.openai.com/v1",
+            "api_key": os.environ.get("OPENAI_API_KEY", ""),
+            "shield_enabled": False,
+        }
+    elif mode == "proxy-only":
+        return {
+            "base_url": llm_cfg.get("base_url", "http://localhost:4000/v1"),
+            "api_key": llm_cfg.get("api_key", "sk-1234"),
+            "shield_enabled": False,
+        }
+    else:
+        return {
+            "base_url": llm_cfg.get("base_url", "http://localhost:4000/v1"),
+            "api_key": llm_cfg.get("api_key", "sk-1234"),
+            "shield_enabled": True,
+        }
+
+
 def create_llm(
-    config: dict[str, Any] | None = None, base_url: str | None = None
+    config: dict[str, Any] | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
 ) -> ChatOpenAI:
     config = config or {}
     llm_config = config.get("llm", {})
 
     return ChatOpenAI(
         base_url=base_url or llm_config.get("base_url", "http://localhost:4000/v1"),
-        api_key=llm_config.get("api_key", "sk-1234"),
+        api_key=api_key or llm_config.get("api_key", "sk-1234"),
         model=config.get("agent", {}).get("model", "gpt-4.1-mini"),
         temperature=config.get("agent", {}).get("temperature", 0.1),
     )
@@ -119,18 +156,25 @@ def build_agent(
     config: dict[str, Any] | None = None,
     base_url: str | None = None,
     system_prompt: str | None = None,
+    mode: str = "full",
 ):
     config = config or load_config()
-    llm = create_llm(config, base_url=base_url)
+    mode_cfg = resolve_mode(mode, config)
+
+    effective_base_url = base_url or mode_cfg["base_url"]
+    effective_api_key = mode_cfg["api_key"]
+
+    llm = create_llm(config, base_url=effective_base_url, api_key=effective_api_key)
     tools = create_tools(config)
 
     middleware = []
     prompt = system_prompt or SYSTEM_PROMPT
 
-    shield = _build_shield(config)
-    if shield:
-        from guardrail_tester.shield.middleware import VotalShieldMiddleware
-        middleware.append(VotalShieldMiddleware(shield, system_prompt=prompt))
+    if mode_cfg["shield_enabled"]:
+        shield = _build_shield(config)
+        if shield:
+            from guardrail_tester.shield.middleware import VotalShieldMiddleware
+            middleware.append(VotalShieldMiddleware(shield, system_prompt=prompt))
 
     return create_agent(
         model=llm,
@@ -170,11 +214,12 @@ async def run_agent(
     config: dict[str, Any] | None = None,
     base_url: str | None = None,
     system_prompt: str | None = None,
+    mode: str = "full",
 ) -> dict[str, Any]:
     config = config or load_config()
     logger.log_input(user_input)
 
-    agent = build_agent(config=config, base_url=base_url, system_prompt=system_prompt)
+    agent = build_agent(config=config, base_url=base_url, system_prompt=system_prompt, mode=mode)
 
     try:
         result = await agent.ainvoke(
